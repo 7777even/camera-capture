@@ -1,0 +1,13 @@
+{
+  "host": "YOUR_HIK_HOST",
+  "port": 443,
+  "app_key": "YOUR_APP_KEY",
+  "app_secret": "YOUR_APP_SECRET",
+  "api_path": "/artemis",
+  "timeout": 10,
+  "retry_count": 2,
+  "feishu_webhook_url": "YOUR_FEISHU_WEBHOOK_URL",
+  "docx_template": "/path/to/巡查台账_模版.docx",
+  "docx_output": "",
+  "docx_img_width": 1.8
+}

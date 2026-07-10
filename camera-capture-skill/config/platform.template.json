@@ -1,0 +1,9 @@
+{
+  "host": "YOUR_HIK_HOST",
+  "port": 443,
+  "app_key": "YOUR_APP_KEY",
+  "app_secret": "YOUR_APP_SECRET",
+  "api_path": "/artemis",
+  "timeout": 10,
+  "retry_count": 2
+}

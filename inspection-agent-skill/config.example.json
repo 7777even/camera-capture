@@ -1,0 +1,6 @@
+{
+  "note1": "此文件仅供参考，平台凭证已封装在技能包 config/platform.json 中。",
+  "note2": "业务品牌文本（巡检标题、飞书卡片等）在 config/branding.json 中配置，换场景只需改那个文件。",
+  "excel_path": "./摄像头清单.xlsx",
+  "save_dir": "./screenshots"
+}

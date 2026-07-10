@@ -1,0 +1,10 @@
+{
+  "_comment": "项目品牌配置 — 切换业务场景时只需修改本文件，无需改任何代码",
+  "project_label": "环保危废",
+  "feishu_card_title": "🔔 环保危废摄像头巡检报告",
+  "feishu_card_footer": "环保小脑巡检助手 · 自动生成",
+  "inspection_start_banner": "环保危废摄像头巡检",
+  "trigger_keywords_extra": "环保危废检查、危废仓库检查",
+  "default_excel_name": "环保小脑摄像头清单.xlsx",
+  "default_docx_name": "危废仓库巡查台账_新模版.docx"
+}
