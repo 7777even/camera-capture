@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 真实凭证：仅本地保留，仓库只发模板 platform.template.json
+**/config/platform.json
+hikvision-config.yaml
+
+# 构建产物 / 打包 zip（本地保留最新包，不提交）
+*.zip
+
+# 本地产物与数据（不提交，本地保留）
+screenshots/
+inspection_*.json
+环保摄像头巡查清单.xlsx
+用户手册_*
+
+# 临时 / 草稿
+_dump.json
+_search_result.json
+_preview_out/
+
+# 本地 agent / 工具目录
+.claude/
+.workbuddy/
+.uploads/
+
+# 冗余旧脚本目录（源码以 *-skill/scripts/ 为准）
+scripts/

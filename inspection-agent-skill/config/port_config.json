@@ -1,0 +1,12 @@
+{
+  "_comment": "智慧港区小脑巡检配置 — 复用环保小脑巡检能力，仅切换品牌与输出格式。凭证仍取自同目录 platform.json（不在此文件重复写密钥）。运行：python scripts/orchestrate.py --config config/port_config.json --excel-path <清单.csv> --report-dir <输出目录> --save-dir <截图目录>",
+  "branding": {
+    "_comment": "品牌文本；load_branding_config 会优先读取合并后 config 的 branding 子对象",
+    "project_label": "智慧港区",
+    "feishu_card_title": "🔔 智慧港区设备巡检报告",
+    "feishu_card_footer": "港区小脑巡检助手 · 自动生成",
+    "inspection_start_banner": "智慧港区设备巡检"
+  },
+  "excel_mode": "snapshot",
+  "region_label": "智慧港区小脑"
+}

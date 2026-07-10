@@ -27,11 +27,12 @@ from camera_capture import capture_single
 
 # ─── 品牌配置加载 ──────────────────────────────────────────
 
-def load_branding_config() -> dict:
+def load_branding_config(merged_config: dict = None) -> dict:
     """
-    加载技能包 config/branding.json，获取业务品牌文本。
-    所有飞书卡片标题/页脚、启动横幅等品牌相关文本均从此配置读取。
-    切换业务场景时只需修改 branding.json，无需改代码。
+    加载品牌配置，优先级：
+      1) 合并后的主配置里若自带 "branding" 子对象（港区等场景通过 --config 传入）→ 优先使用
+      2) 否则读取技能包 config/branding.json（环保默认）
+    切换业务场景只需改对应 branding，无需改代码。
     """
     script_dir = os.path.dirname(os.path.abspath(__file__))
     branding_path = os.path.join(script_dir, "..", "config", "branding.json")
@@ -41,13 +42,20 @@ def load_branding_config() -> dict:
         "feishu_card_title": "摄像头巡检报告",
         "feishu_card_footer": "巡检助手 · 自动生成",
         "inspection_start_banner": "摄像头巡检",
+        "region_label": "",          # 快照Excel的『所属区域』列 / 文件标题前缀
     }
 
+    # 1) 主配置自带 branding（港区场景）
+    if isinstance(merged_config, dict) and isinstance(merged_config.get("branding"), dict):
+        b = defaults.copy()
+        b.update(merged_config["branding"])
+        return b
+
+    # 2) 技能包 branding.json（环保默认）
     if os.path.exists(branding_path):
         try:
             with open(branding_path, "r", encoding="utf-8") as f:
                 branding = json.load(f)
-            # 合并默认值（确保所有键都存在）
             for k, v in defaults.items():
                 branding.setdefault(k, v)
             return branding
@@ -270,6 +278,173 @@ def update_excel(excel_path: str, results: list, today_str: str = None):
         return False
 
 
+# ─── Step 4b: 生成每日快照 Excel ─────────────────────
+
+def generate_daily_snapshot_excel(cameras: list, results: list, config: dict,
+                                   branding: dict, today_display: str):
+    """
+    生成『模板格式』的每日巡检快照 Excel。
+
+    两种模式：
+      1) 指定 snapshot_template（港区场景）：以参考模板为基底，保留其原有
+         样式/公式/摄像头清单，仅刷新【巡检时间】列与【在线状态/离线原因】
+         （按摄像头名称匹配）。所属区域、监控点名称列保持模板原样不动。
+      2) 未指定模板（环保/通用场景）：从零构建 5 列表格。
+
+    文件名:    {region_label}设备巡检记录{date}.xlsx
+    """
+    try:
+        import openpyxl
+        from openpyxl.styles import Font, Alignment, Border, Side
+    except ImportError:
+        print("WARNING: openpyxl 未安装，跳过快照Excel生成")
+        return None
+
+    region_label = config.get("region_label") or branding.get("region_label") or "智慧港区小脑"
+    status_cn = {"online": "在线", "offline": "离线", "abnormal": "异常"}
+    name_map = {r.get("cameraName"): r for r in results}
+    code_map = {r.get("cameraCode"): r for r in results}
+
+    # 港区场景：沿用参考模板样式，仅刷新时间列与离线状态
+    template_path = config.get("snapshot_template")
+    if template_path and os.path.exists(template_path):
+        return _generate_snapshot_from_template(
+            template_path, results, config, region_label, status_cn, name_map, today_display)
+
+    # 通用场景：从零构建
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.title = "巡检记录"
+
+    # 标题行
+    ws.merge_cells("A1:E1")
+    ws["A1"] = f"{today_display}巡检记录"
+    ws["A1"].font = Font(bold=True, size=14)
+    ws["A1"].alignment = Alignment(horizontal="center", vertical="center")
+
+    # 表头
+    headers = ["所属区域", "监控点名称", "在线状态", "巡检时间", "离线原因"]
+    thin = Side(style="thin", color="BBBBBB")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    for i, h in enumerate(headers, start=1):
+        c = ws.cell(2, i, h)
+        c.font = Font(bold=True)
+        c.alignment = Alignment(horizontal="center", vertical="center")
+        c.border = border
+
+    # 数据行
+    r = 3
+    for cam in cameras:
+        name = cam.get("name", "")
+        region = cam.get("region") or region_label
+        res = code_map.get(cam.get("code")) or name_map.get(name) or {}
+        status = res.get("status", "offline")
+        is_online_like = status in ("online", "abnormal")
+        reason = "--" if is_online_like else (res.get("errorMsg") or "未知")
+        capture_time = res.get("captureTime") or datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        vals = [region, name, status_cn.get(status, "未知"), capture_time, reason]
+        for i, v in enumerate(vals, start=1):
+            c = ws.cell(r, i, v)
+            c.alignment = Alignment(horizontal="center", vertical="center")
+            c.border = border
+            if i == 3:  # 在线状态着色
+                if status == "online":
+                    c.font = Font(color="006100", bold=True)
+                elif status == "offline":
+                    c.font = Font(color="9C0006", bold=True)
+                else:
+                    c.font = Font(color="9C5700", bold=True)
+        r += 1
+
+    # 列宽
+    for i, w in enumerate([16, 38, 12, 22, 34], start=1):
+        ws.column_dimensions[openpyxl.utils.get_column_letter(i)].width = w
+
+    # 保存
+    report_dir = config.get("report_dir") or config.get("save_dir") or "./reports"
+    os.makedirs(report_dir, exist_ok=True)
+    out_name = f"{region_label}设备巡检记录{today_display}.xlsx"
+    out_path = os.path.join(report_dir, out_name)
+    wb.save(out_path)
+    print(f"快照Excel已生成: {out_path}")
+    return out_path
+
+
+def _generate_snapshot_from_template(template_path: str, results: list, config: dict,
+                                     region_label: str, status_cn: dict,
+                                     name_map: dict, today_display: str):
+    """
+    以参考模板为基底生成快照：保留模板全部样式与摄像头清单，
+    仅刷新【巡检时间】列与【在线状态/离线原因】（按摄像头名称匹配）。
+    所属区域、监控点名称列（可能是 ="..." 公式）保持原样不动。
+    """
+    import openpyxl
+    from copy import copy as shallow_copy
+
+    wb = openpyxl.load_workbook(template_path)   # 保留原样式 + 公式
+    ws = wb.active
+
+    # 按表头文本定位列（兼容列顺序微调）
+    col = {"region": 1, "name": 2, "status": 3, "time": 4, "reason": 5}
+    header_row = 2
+    for hr in range(1, 4):
+        vals = [ws.cell(hr, c).value for c in range(1, ws.max_column + 1)]
+        if any(isinstance(v, str) and "监控点名称" in v for v in vals):
+            header_row = hr
+            for c in range(1, ws.max_column + 1):
+                v = ws.cell(hr, c).value
+                if not isinstance(v, str):
+                    continue
+                if "所属区域" in v: col["region"] = c
+                elif "监控点名称" in v: col["name"] = c
+                elif "在线状态" in v: col["status"] = c
+                elif "离线原因" in v: col["reason"] = c
+                elif "巡检时间" in v or "时间" in v: col["time"] = c
+            break
+
+    # 标题行日期刷新（仅改文字，保留合并/字体样式）
+    title_cell = ws.cell(1, 1)
+    if title_cell.value:
+        title_cell.value = f"{today_display}巡检记录"
+
+    def unwrap(v):
+        if v is None:
+            return ""
+        s = str(v)
+        if s.startswith("="):
+            s = s[1:]
+            if len(s) >= 2 and s[0] in "\"'":
+                s = s[1:-1]
+        return s.strip()
+
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    updated = 0
+    for r in range(header_row + 1, ws.max_row + 1):
+        name = unwrap(ws.cell(r, col["name"]).value)
+        if not name:
+            continue
+        res = name_map.get(name)
+        if res is None:
+            continue  # 模板有但本次未巡检：保持原值不动
+        status = res.get("status", "offline")
+        is_online_like = status in ("online", "abnormal")
+        reason = "--" if is_online_like else (res.get("errorMsg") or "未知")
+        capture_time = res.get("captureTime") or now_str
+        # 仅覆盖 时间列 / 状态列 / 离线原因列
+        ws.cell(r, col["time"]).value = capture_time
+        ws.cell(r, col["status"]).value = status_cn.get(status, "未知")
+        ws.cell(r, col["reason"]).value = reason
+        updated += 1
+
+    report_dir = config.get("report_dir") or config.get("save_dir") or "./reports"
+    os.makedirs(report_dir, exist_ok=True)
+    out_name = f"{region_label}设备巡检记录{today_display}.xlsx"
+    out_path = os.path.join(report_dir, out_name)
+    wb.save(out_path)
+    print(f"快照Excel(沿用模板样式)已生成: {out_path}  (刷新 {updated} 路)")
+    return out_path
+
+
 # ─── Step 5: 飞书通知 ─────────────────────────────────
 
 def send_feishu_notification(summary: dict, webhook_url: str, branding: dict = None):
@@ -437,8 +612,8 @@ def run_inspection(config: dict):
         print("请通过 --excel-path 参数指定摄像头清单路径")
         sys.exit(1)
 
-    # 加载品牌配置
-    branding = load_branding_config()
+    # 加载品牌配置（港区场景会从合并后的 config["branding"] 读取）
+    branding = load_branding_config(config)
     banner = branding.get("inspection_start_banner", "摄像头巡检")
 
     print(f"\n{'='*50}")
@@ -472,10 +647,16 @@ def run_inspection(config: dict):
     if summary["all_failed"]:
         print("  🚨 全部摄像头离线!")
 
-    # Step 4: 更新 Excel
-    print(f"\n[Step 4] 更新 Excel...")
+    # Step 4: 更新 Excel（按模式分流）
     today_str = date.today().strftime("%Y%m%d")
-    update_excel(excel_path, results, today_str)
+    today_display = date.today().strftime("%Y-%m-%d")
+    excel_mode = config.get("excel_mode", "accumulate")
+    if excel_mode == "snapshot":
+        print(f"\n[Step 4] 生成每日快照Excel...")
+        generate_daily_snapshot_excel(cameras, results, config, branding, today_display)
+    else:
+        print(f"\n[Step 4] 更新 Excel（累计模式）...")
+        update_excel(excel_path, results, today_str)
 
     # Step 5: 更新 Word 巡查台账
     print(f"\n[Step 5] 更新 Word 巡查台账...")
@@ -514,6 +695,11 @@ def main():
     parser.add_argument("--feishu-webhook", default=None, help="飞书机器人 Webhook URL（覆盖配置中的值）")
     parser.add_argument("--docx-template", default=None, help="Word 巡查台账模版路径（如: ./巡查台账_模版.docx）")
     parser.add_argument("--docx-output", default=None, help="Word 台账输出路径（默认按日期自动命名）")
+    parser.add_argument("--excel-mode", default=None, choices=["accumulate", "snapshot"],
+                        help="Excel 输出模式：accumulate=累计追加列(环保默认) / snapshot=每日快照模板(港区)")
+    parser.add_argument("--report-dir", default=None, help="snapshot 模式下的快照Excel输出目录")
+    parser.add_argument("--region-label", default=None, help="snapshot 模式下『所属区域』列 / 文件标题前缀")
+    parser.add_argument("--snapshot-template", default=None, help="snapshot 模式参考模板路径（沿用其样式，仅刷新时间列与离线状态）")
     parser.add_argument("--test-single", default=None, help="测试单个摄像头 (传编码)")
     args = parser.parse_args()
 
@@ -544,17 +730,19 @@ def main():
         print(json.dumps(result, ensure_ascii=False, indent=2))
         sys.exit(0 if result.get("status") == "online" else 1)
 
-    # 加载配置
+    # 加载配置：平台凭证(含密钥)始终以技能包 config/platform.json 为基准，
+    # --config 仅作覆盖/补充（港区配置无需重复写密钥）。
     if args.config:
-        # 完全自定义配置
         if not os.path.exists(args.config):
             print(f"ERROR: 配置文件不存在: {args.config}")
             sys.exit(1)
+        base = load_platform_config()
         with open(args.config, "r", encoding="utf-8") as f:
-            config = json.load(f)
-        print(f"[配置] 从 {args.config} 加载")
+            override = json.load(f)
+        base.update(override)
+        config = base
+        print(f"[配置] 基准 platform.json + 覆盖 {args.config}")
     else:
-        # 使用技能包本地配置作为默认值（CLI 参数可覆盖）
         config = load_platform_config()
 
     # 合并用户运行时配置（CLI 参数优先级最高，可覆盖一切）
@@ -576,6 +764,14 @@ def main():
         config["docx_template"] = args.docx_template
     if args.docx_output:
         config["docx_output"] = args.docx_output
+    if args.excel_mode:
+        config["excel_mode"] = args.excel_mode
+    if args.report_dir:
+        config["report_dir"] = args.report_dir
+    if args.region_label:
+        config["region_label"] = args.region_label
+    if args.snapshot_template:
+        config["snapshot_template"] = args.snapshot_template
 
     sys.exit(run_inspection(config))
 
